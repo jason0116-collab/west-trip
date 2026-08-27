@@ -15,7 +15,37 @@ if (!password) {
   process.exit(1);
 }
 
-const plaintext = readFileSync(join(ROOT, "source/trip.html"));
+// 빌드 시점 환율을 폴백 값으로 굽는다. 브라우저에서 API 조회에 실패했을 때만 쓰인다.
+async function fetchUsdKrw() {
+  const sources = [
+    ["https://open.er-api.com/v6/latest/USD", (j) => j?.rates?.KRW],
+    ["https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json", (j) => j?.usd?.krw],
+  ];
+  for (const [url, pick] of sources) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
+      const rate = pick(await res.json());
+      if (rate > 500 && rate < 3000) return Math.round(rate * 100) / 100;
+    } catch {}
+  }
+  return null;
+}
+
+let source = readFileSync(join(ROOT, "source/trip.html"), "utf8");
+const fxAnchor = /const FX_FALLBACK='[\d.]+',FX_FALLBACK_DATE='[^']*';/;
+if (!fxAnchor.test(source)) throw new Error("source/trip.html 에서 FX_FALLBACK 앵커를 찾지 못했습니다.");
+
+const rate = process.env.SKIP_FX ? null : await fetchUsdKrw();
+if (rate) {
+  const today = new Date().toISOString().slice(0, 10);
+  source = source.replace(fxAnchor, `const FX_FALLBACK='${rate}',FX_FALLBACK_DATE='${today}';`);
+  console.log(`폴백 환율 갱신 · 1 USD = ${rate.toLocaleString("ko-KR")}원 (${today})`);
+} else {
+  console.warn("환율 조회 실패 · source/trip.html 의 기존 폴백 값을 그대로 사용합니다.");
+}
+
+const plaintext = Buffer.from(source, "utf8");
 const salt = randomBytes(16);
 const iv = randomBytes(12);
 const key = pbkdf2Sync(Buffer.from(password, "utf8"), salt, ITERATIONS, 32, "sha256");
