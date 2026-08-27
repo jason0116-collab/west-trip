@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>WEST 26/27 · 가족 전용</title>
+<style>
+  :root{--ink:#172128;--muted:#64737a;--paper:#f4f0e8;--card:#fffdf8;--navy:#123d59;--coral:#e46f51;--gold:#e6b955;--line:#d8ded9;--red:#a74c46}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;
+       background:var(--paper);color:var(--ink);
+       font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,Arial,sans-serif;
+       line-height:1.55}
+  .card{width:100%;max-width:420px;padding:38px 32px 32px;border-radius:22px;
+        background:var(--card);border:1px solid var(--line);
+        box-shadow:0 18px 55px rgba(27,45,53,.12)}
+  .badge{display:inline-block;padding:4px 9px;border-radius:7px;background:var(--ink);color:#fff;
+         font-size:10px;font-weight:900;letter-spacing:.08em}
+  h1{margin:14px 0 6px;font-size:23px;font-weight:900;letter-spacing:-.03em}
+  p.sub{margin:0 0 26px;color:var(--muted);font-size:13px}
+  label{display:block;margin-bottom:7px;font-size:12px;font-weight:800;color:var(--navy)}
+  .row{display:flex;gap:8px}
+  input[type=password],input[type=text]{flex:1;min-width:0;padding:13px 14px;border:1px solid var(--line);
+        border-radius:12px;background:#fff;font-size:15px;font-family:inherit;color:var(--ink)}
+  input:focus{outline:2px solid var(--navy);outline-offset:1px}
+  button{padding:13px 20px;border:0;border-radius:12px;background:var(--navy);color:#fff;
+         font-size:14px;font-weight:900;font-family:inherit;cursor:pointer;white-space:nowrap}
+  button:hover{background:#0d2f45}
+  button:disabled{opacity:.55;cursor:progress}
+  .remember{display:flex;align-items:center;gap:7px;margin-top:14px;font-size:12px;color:var(--muted)}
+  .remember input{accent-color:var(--navy)}
+  .msg{margin-top:16px;padding:11px 13px;border-radius:10px;font-size:12.5px;font-weight:700;display:none}
+  .msg.err{display:block;background:#fbeceb;color:var(--red);border:1px solid #f0d2d0}
+  .msg.info{display:block;background:#eef4f2;color:var(--navy);border:1px solid #d5e3de}
+  .foot{margin-top:24px;padding-top:16px;border-top:1px dashed var(--line);
+        font-size:11px;color:var(--muted);line-height:1.7}
+  noscript{display:block;margin-top:16px;color:var(--red);font-size:12.5px;font-weight:700}
+</style>
+</head>
+<body>
+<main class="card">
+  <span class="badge">FAMILY ONLY</span>
+  <h1>2026–2027 미국 서부 가족 로드트립</h1>
+  <p class="sub">가족 전용 일정표입니다. 비밀번호를 입력해 주세요.</p>
+
+  <form id="f" autocomplete="on">
+    <label for="pw">비밀번호</label>
+    <div class="row">
+      <input id="pw" name="password" type="password" autocomplete="current-password"
+             placeholder="비밀번호 입력" required autofocus>
+      <button id="go" type="submit">열기</button>
+    </div>
+    <label class="remember"><input id="rm" type="checkbox" checked> 이 기기에서 기억하기</label>
+  </form>
+
+  <div id="msg" class="msg"></div>
+
+  <div class="foot">
+    이 페이지의 본문은 AES-256으로 암호화되어 저장됩니다.<br>
+    비밀번호 없이는 내용을 볼 수 없습니다.
+  </div>
+  <noscript>이 페이지를 보려면 자바스크립트를 켜주세요.</noscript>
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var PAYLOAD = __PAYLOAD__;
+  var STORE_KEY = "west2627.pw";
+
+  var f = document.getElementById("f"),
+      pwEl = document.getElementById("pw"),
+      rmEl = document.getElementById("rm"),
+      goEl = document.getElementById("go"),
+      msgEl = document.getElementById("msg");
+
+  function say(text, kind){ msgEl.textContent = text; msgEl.className = "msg " + (kind || "info"); }
+  function clearMsg(){ msgEl.textContent = ""; msgEl.className = "msg"; }
+
+  function b64ToBytes(s){
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function deriveKey(password, salt){
+    var enc = new TextEncoder();
+    return crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"])
+      .then(function(base){
+        return crypto.subtle.deriveKey(
+          { name: "PBKDF2", salt: salt, iterations: PAYLOAD.iterations, hash: "SHA-256" },
+          base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+      });
+  }
+
+  function decrypt(password){
+    var salt = b64ToBytes(PAYLOAD.salt), iv = b64ToBytes(PAYLOAD.iv), ct = b64ToBytes(PAYLOAD.ct);
+    return deriveKey(password, salt).then(function(key){
+      return crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, key, ct);
+    }).then(function(buf){
+      return new TextDecoder().decode(buf);
+    });
+  }
+
+  function reveal(html){
+    document.open();
+    document.write(html);
+    document.close();
+  }
+
+  function attempt(password, opts){
+    opts = opts || {};
+    goEl.disabled = true;
+    if (!opts.silent) say("여는 중…", "info");
+    return decrypt(password).then(function(html){
+      if (rmEl.checked || opts.silent) {
+        try { localStorage.setItem(STORE_KEY, password); } catch (e) {}
+      }
+      if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+      reveal(html);
+    }).catch(function(){
+      goEl.disabled = false;
+      try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+      if (opts.silent) { clearMsg(); return; }
+      say("비밀번호가 올바르지 않습니다. 다시 확인해 주세요.", "err");
+      pwEl.value = "";
+      pwEl.focus();
+    });
+  }
+
+  if (!window.crypto || !crypto.subtle) {
+    say("이 브라우저에서는 열 수 없습니다. https 주소로 최신 브라우저에서 열어주세요.", "err");
+    goEl.disabled = true;
+    return;
+  }
+
+  f.addEventListener("submit", function(e){
+    e.preventDefault();
+    var v = pwEl.value.trim();
+    if (v) attempt(v);
+  });
+
+  // 1) 공유 링크의 #pw=... 로 자동 열기  2) 저장된 비밀번호로 자동 열기
+  var m = /(?:^|[#&])pw=([^&]+)/.exec(location.hash || "");
+  if (m) {
+    attempt(decodeURIComponent(m[1]), { silent: true });
+  } else {
+    var saved = null;
+    try { saved = localStorage.getItem(STORE_KEY); } catch (e) {}
+    if (saved) attempt(saved, { silent: true });
+  }
+})();
+</script>
+</body>
+</html>
